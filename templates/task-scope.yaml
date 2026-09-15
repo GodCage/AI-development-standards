@@ -1,0 +1,58 @@
+id: TASK-1024
+title: 增加订单取消功能
+owner: team-order
+
+goal: |
+  支持符合条件的订单取消，并提供明确的取消结果。
+
+context:
+  module: order
+  related_docs:
+    - docs/domain/order.md
+    - docs/adr/ADR-0001-module-boundaries.md
+
+scope:
+  allowed:
+    - src/main/java/com/company/product/order/**
+    - src/test/java/com/company/product/order/**
+    - docs/domain/order.md
+  readonly:
+    - src/main/java/com/company/product/platform/**
+    - src/main/java/com/company/product/inventory/**
+  forbidden:
+    - src/main/java/com/company/product/customer/internal/**
+    - pom.xml
+
+dependencies:
+  module_api_allowed:
+    - inventory.api
+  new_third_party_dependency_allowed: false
+
+contracts:
+  may_change:
+    - order.api.command.CancelOrderCommand
+  must_not_change:
+    - order.api.query.OrderQueryFacade
+
+constraints:
+  - 不修改 Platform
+  - 不直接访问库存模块 internal 或数据库表
+  - 不改变现有订单创建流程
+  - 需要越界时先申请调整 Scope
+
+acceptance:
+  - 已取消订单再次取消时返回幂等结果
+  - 不允许取消的订单状态返回明确业务错误
+  - 订单模块编译通过
+  - 订单模块测试通过
+  - Spring Modulith 和 ArchUnit 校验通过
+
+verification:
+  commands:
+    - ./mvnw -DskipTests compile
+    - ./mvnw -Dtest='*Order*Test,*ArchitectureTests' test
+  report:
+    - changed_files
+    - test_results
+    - contract_changes
+    - remaining_risks
