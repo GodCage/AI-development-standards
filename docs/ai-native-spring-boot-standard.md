@@ -28,7 +28,9 @@
 - 研发与一个或多个编码 Agent 协作的项目；
 - 希望逐步治理存量工程，而不是一次性重写的团队。
 
-本规范默认以 **Java 17+、Spring Boot 3.x、Maven** 为示例。具体版本应由项目 BOM 统一管理。
+本规范以 **Java 17+、Spring Boot 3.x、Maven** 为参考基线，不要求存量项目直接升级。接入前必须在项目接入清单中锁定 JDK、Spring Boot、Spring Modulith、MyBatis 或 MyBatis-Plus 的兼容版本。先落地包边界与测试，再按需引入框架能力。
+
+规范级别：**必须**为验收门禁，**建议**可通过 ADR 说明替代方案，**可选**按复杂度启用。具体实施顺序、技术能力归属和验收要求见[业务项目落地指南](business-project-adoption.md)。本仓库交付规范和模板，不是已编译运行的 Spring Boot 脚手架。
 
 ### 1.3 非目标
 
@@ -75,51 +77,35 @@ flowchart TB
 
 ## 3. 推荐工程目录
 
-### 3.1 默认方案：包级模块化单体
+### 3.1 默认方案：单工程、目录模块、按能力分组
 
-新项目默认使用一个可运行的 Spring Boot 工程，以 Java package 作为业务模块边界。这样能够获得清晰边界，同时避免过早制造大量 Maven 子模块。
+只有一个应用 pom.xml 和一个启动入口。domains/core、domains/supporting、integrations 和 platform 是分类目录，不因创建目录而建立独立 Maven 工程或 Spring 容器。
 
-```text
-project/
-├── pom.xml
-├── README.md
-├── AGENTS.md                         # 仓库级 AI 规则
-├── docs/
-│   ├── architecture/
-│   ├── domain/
-│   └── adr/
-├── .ai/
-│   └── tasks/                        # 单次任务范围定义
-│
-├── src/main/java/com/company/product/
-│   ├── ProductApplication.java
-│   │
-│   ├── order/                        # 订单领域模块
-│   │   ├── AGENTS.md                 # 订单模块局部规则
-│   │   ├── api/                      # 供其他业务模块调用
-│   │   ├── spi/                      # 供适配器实现
-│   │   └── internal/                 # 订单内部实现
-│   │       ├── application/
-│   │       ├── domain/
-│   │       ├── adapter/
-│   │       │   ├── in/
-│   │       │   └── out/
-│   │       └── config/
-│   │
-│   ├── customer/
-│   │   ├── AGENTS.md
-│   │   ├── api/
-│   │   ├── spi/
-│   │   └── internal/
-│   │
-│   ├── inventory/
-│   ├── integrations/                 # SAP、CRM、短信等外部系统适配
-│   └── platform/                     # 技术能力统一收口
-│
-└── src/test/java/com/company/product/
-    ├── architecture/                 # Modulith / ArchUnit 规则
-    └── modules/                      # 模块测试与集成测试
-```
+| 路径（相对 Java 根包） | 职责 | 例子 |
+|---|---|---|
+| domains/core/<module> | 核心业务模块 | order、inventory |
+| domains/supporting/<module> | 支撑业务模块 | identity、organization、dictionary |
+| integrations/<system> | 外部协议适配或复杂集成业务 | sap、crm |
+| platform/core | 无框架依赖的最小共享技术契约 | 错误码接口、时钟抽象 |
+| platform/data | 持久化技术 | MyBatis 配置、持久化基类 |
+| platform/security | 认证授权机制 | 安全过滤链、当前用户接口 |
+| platform/web | HTTP 通用处理 | 全局错误响应、序列化 |
+| platform/observability | 可观测性 | 日志脱敏、Trace |
+
+项目布局约定：
+
+- 启动类：src/main/java/com/company/product/ProductApplication.java，放在根包。
+- 订单代码：src/main/java/com/company/product/domains/core/order/。
+- 订单测试：src/test/java/com/company/product/domains/core/order/，镜像生产包。
+- 架构测试：src/test/java/com/company/product/architecture/。
+- MyBatis XML：src/main/resources/mybatis/order/，按模块归属。
+- 数据迁移：src/main/resources/db/migration/，统一版本号并登记表归属；使用 Liquibase 时按项目清单选择等价 changelog 目录，不同时引入两套迁移工具。
+- 项目规范：根 AGENTS.md、模块内 AGENTS.md、docs/architecture/、docs/adr/。
+- 任务约束：.ai/tasks/<task-id>.yaml。
+
+三种边界必须分清：域分组是分类；order 等模块是逻辑边界；api/internal 等是模块内分层。Spring Modulith 可以直接验证目录模块，不是 Maven 拆分后的必经阶段。
+
+简单 CRUD 保留 api/internal，内部可先使用 application 和 adapter/persistence；有真实业务不变量再引入 domain。不得为了形式创建空层或为每个类创建同名接口。
 
 ### 3.2 何时升级为 Maven 多模块
 
@@ -180,7 +166,7 @@ order/
 │   ├── event/
 │   └── OrderFacade.java
 ├── spi/                              # 基础设施或外部适配器实现
-│   ├── OrderRepository.java
+│   ├── OrderExportCommand.java
 │   └── OrderExportPort.java
 └── internal/                         # 仅订单模块内部使用
     ├── application/
@@ -214,9 +200,21 @@ order/
 - 模块外部禁止直接引用其他模块的 `internal`；
 - 模块 API 变更属于显式契约变更，需要检查所有调用方。
 
+Repository 默认放 internal/domain/repository 或 internal/application/port/out，由本模块内部持久化适配器实现。只有确需模块外实现的端口才公开为 spi，且 SPI 的入参、返回值不得暴露 internal 类型。不要将含内部领域模型的 Repository 直接公开。
+
 若项目暂不需要独立外部适配层，可以先只使用 `api/internal`，将端口放在 `internal/application/port/out`；但一旦适配器需要跨模块独立演进，建议提升为明确的 `spi`。
 
 ### 4.3 让 Spring Modulith 真正识别公开接口
+
+本规范使用多层分类包，必须在实际选定版本中配置并验证显式模块检测：
+
+```properties
+spring.modulith.detection-strategy=explicitly-annotated
+```
+
+只标注 order、inventory、identity、sap 等真正的叶子模块，以及需要纳入检测的 platform 能力包；不标注 domains、core、supporting、integrations、platform 分类父包。每个模块登记唯一 ID（例如 platformCore、platformData、platformSecurity），allowedDependencies 使用实际检测到的 ID。
+
+架构测试必须断言检测到的模块集合等于项目登记清单，然后执行 verify()。独立执行的架构测试也必须加载检测配置；不得假设未启动 Spring 的测试一定读取 application.yml。框架版本不支持此策略时，在测试中配置经过验证的检测策略或先用 ArchUnit，不直接照抄配置。
 
 Spring Modulith 默认只把模块根包中的公开类型视为模块 API，模块的子包默认属于内部实现。因此，采用独立 `api`、`spi` 子包时，必须使用 Named Interface 显式声明，不能只依赖目录名称。
 
@@ -224,14 +222,14 @@ Spring Modulith 默认只把模块根包中的公开类型视为模块 API，模
 
 ```java
 @org.springframework.modulith.NamedInterface("api")
-package com.company.product.order.api;
+package com.company.product.domains.core.order.api;
 ```
 
 `order.spi/package-info.java`：
 
 ```java
 @org.springframework.modulith.NamedInterface("spi")
-package com.company.product.order.spi;
+package com.company.product.domains.core.order.spi;
 ```
 
 如果 `api` 下继续划分 `command`、`query`、`dto` 等 Java 子包，应为需要公开的子包声明同名 Named Interface，或统一配置递归的 Named Interface 检测策略。不得为了省事把整个模块配置为 Open Module。
@@ -243,10 +241,11 @@ package com.company.product.order.spi;
     allowedDependencies = {
         "customer :: api",
         "inventory :: api",
-        "platform"
+        "platformCore :: api",
+        "platformData :: api"
     }
 )
-package com.company.product.order;
+package com.company.product.domains.core.order;
 ```
 
 这使“只能依赖其他模块公开 API”进入 Spring Modulith 的结构校验，而不只是文字约定。
@@ -255,11 +254,11 @@ package com.company.product.order;
 
 ```mermaid
 flowchart TB
-    IN["adapter/in<br/>HTTP · MQ · Job"]
-    APP["application<br/>用例编排"]
-    DOM["domain<br/>业务规则"]
+    IN["adapter/in：HTTP · MQ · Job"]
+    APP["application：用例编排"]
+    DOM["domain：业务规则"]
     PORT["spi / outbound port"]
-    OUT["adapter/out 或 integrations<br/>DB · Cache · Remote"]
+    OUT["adapter/out 或 integrations：DB · Cache · Remote"]
 
     IN --> APP
     APP --> DOM
@@ -287,21 +286,21 @@ flowchart TB
 禁止：
 
 ```java
-import com.company.product.order.internal.domain.Order;
-import com.company.product.order.internal.adapter.out.persistence.OrderMapper;
+import com.company.product.domains.core.order.internal.domain.Order;
+import com.company.product.domains.core.order.internal.adapter.out.persistence.OrderMapper;
 ```
 
 允许：
 
 ```java
-import com.company.product.order.api.OrderQueryFacade;
-import com.company.product.order.api.dto.OrderSummary;
+import com.company.product.domains.core.order.api.OrderQueryFacade;
+import com.company.product.domains.core.order.api.dto.OrderSummary;
 ```
 
 依赖关系应始终是：
 
 ```text
-Customer internal -> Order api -> Order internal
+Customer internal -> Order api；Order internal 实现 Order api（API 不反向依赖实现）
 ```
 
 而不是：
@@ -363,17 +362,19 @@ OrderDetailQuery
 
 ## 6. Platform 技术底座
 
+本节名称中的 starter/bom 是未来跨项目复用时的组件形态；当前默认只采用 platform 下的普通 Java 包。详细类归属、装配、异常、安全及 BaseEntity 约束见[业务项目落地指南](business-project-adoption.md)。
+
 ### 6.1 职责
 
 Platform 用于统一基础技术，而不是承载跨业务的“万能公共代码”。建议按能力拆分：
 
 | 模块 | 收口内容 |
 |---|---|
-| `platform-bom` | JDK、Spring、数据库驱动、中间件和测试依赖版本 |
-| `platform-core` | 最小异常基类、分页契约、时钟、ID、用户/租户上下文接口 |
+| `platform-bom` | Spring、数据库驱动、中间件和测试依赖版本；JDK另由Toolchains/Enforcer及CI约束 |
+| `platform-core` | 纯Java的最小异常基类、分页契约、时钟和ID抽象 |
 | `platform-web` | Jackson、参数校验、统一错误响应、Filter、Interceptor、Trace |
 | `platform-data` | 数据源、事务约定、分页、审计、SQL 日志 |
-| `platform-security` | 认证、授权、接口安全、用户上下文实现 |
+| `platform-security` | 认证、授权、接口安全、当前用户契约和上下文实现 |
 | `platform-cache` | Redis 配置、序列化、Key 规范、缓存观测 |
 | `platform-mq` | 消息格式、序列化、重试、死信、幂等、Trace |
 | `platform-observability` | 日志、Metrics、Tracing、健康检查 |
@@ -439,7 +440,7 @@ Agent 开始任务前应依次读取：
 - 任务目标；
 - `allowed`：允许修改目录；
 - `readonly`：可以阅读但不得修改；
-- `forbidden`：不得访问或不得修改的目录；
+- `forbidden`：禁止修改的目录（读取限制如有需要，单独声明）；
 - 允许新增的模块依赖；
 - 必须执行的验证；
 - 验收条件；
@@ -450,7 +451,7 @@ Agent 开始任务前应依次读取：
 ### 8.3 Agent 执行流程
 
 ```mermaid
-flowchart LR
+flowchart TB
     A["读取规则和 Scope"] --> B["定位模块与公开契约"]
     B --> C["生成最小变更计划"]
     C --> D["在允许范围内实现"]
@@ -562,7 +563,9 @@ class ArchitectureTests {
 -> Task Scope 越界检查
 ```
 
-其中 Task Scope 越界检查可使用 `git diff --name-only` 与任务 YAML 的路径规则比对。违规时 CI 应失败，而不是只输出警告。
+本仓库未提供已接入业务工程的 CI；下面是项目接入时必须实现和验收的门禁要求，而不是已经生效的能力。
+
+其中 Task Scope 越界检查可使用 `git diff --name-only` 与任务 YAML 的路径规则比对。必须覆盖新增、修改、删除和重命名的旧/新路径；本地检查还要包含未跟踪文件。路径按仓库根相对路径匹配：** 匹配任意层级，* 不跨 /；forbidden 和 readonly 优先于 allowed，未命中 allowed 默认禁止。CI 使用可信基线中的 Scope，不能允许任务通过修改自身 Scope 放宽权限。违规时 CI 应失败，而不是只输出警告。
 
 ## 10. 测试策略
 

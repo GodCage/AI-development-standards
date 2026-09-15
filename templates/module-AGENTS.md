@@ -1,5 +1,10 @@
 # <Module Name> Module
 
+- 模块唯一ID：<填写>
+- 分组及完整包路径：<core/supporting/integrations/platform；填写真实路径>
+- 负责人：<填写>
+- 状态：<试点/已接入/迁移中>
+
 ## 职责
 
 - <本模块负责的业务能力>
@@ -22,10 +27,11 @@
 
 除 `api` 中明确公开的类型外，其他模块不得依赖本模块实现。
 
-## 所需 SPI
+## 所需 SPI（仅模块外实现时公开）
 
-- `<XxxRepository>`：<用途>
 - `<ExternalXxxPort>`：<用途及实现位置>
+
+模块内 Repository 放 internal 的端口包，不公开内部领域模型。
 
 ## 外部依赖
 
@@ -50,9 +56,17 @@
 
 - <只能在本模块适用的补充规则>
 
+## 底座使用与权限
+
+- MyBatis/Entity/审计/错误协议采用的Platform契约：<填写>
+- 接口或用例所需权限、资源归属和租户约束：<填写>
+- 不得定义全局安全链、数据源或异常Advice；确需扩展先审批。
+- 模块级集成测试与生产代码同包；记录需加载或替换的Platform依赖。
+
 ## 验证命令
 
 ```bash
 <module build command>
 <module test command>
 ```
+

@@ -1,58 +1,65 @@
+# 示例：复制前替换包名与项目命令，确认后作为可信任务基线。
+# glob：** 任意层级；* 不跨 /；readonly/forbidden 优先；未命中allowed禁止修改。
+# 本文件只声明规则；需业务项目实现Scope检查器并接入CI。
 id: TASK-1024
 title: 增加订单取消功能
 owner: team-order
-
-goal: |
-  支持符合条件的订单取消，并提供明确的取消结果。
-
+goal: 支持符合条件的订单取消，保持既有创建流程和接口兼容
 context:
   module: order
   related_docs:
-    - docs/domain/order.md
-    - docs/adr/ADR-0001-module-boundaries.md
-
+    - docs/architecture/project-adoption.md
 scope:
   allowed:
-    - src/main/java/com/company/product/order/**
-    - src/test/java/com/company/product/order/**
+    - src/main/java/com/company/product/domains/core/order/**
+    - src/test/java/com/company/product/domains/core/order/**
+    - src/main/resources/mybatis/order/**
     - docs/domain/order.md
   readonly:
     - src/main/java/com/company/product/platform/**
-    - src/main/java/com/company/product/inventory/**
+    - src/main/java/com/company/product/domains/core/inventory/**
+    - src/main/java/com/company/product/domains/supporting/**
   forbidden:
-    - src/main/java/com/company/product/customer/internal/**
     - pom.xml
-
+    - src/main/resources/application*
+    - src/main/resources/db/migration/**
+    - src/test/java/com/company/product/architecture/**
+    - .ai/tasks/**
+    - .github/**
 dependencies:
   module_api_allowed:
-    - inventory.api
+    - inventory :: api
   new_third_party_dependency_allowed: false
-
 contracts:
   may_change:
-    - order.api.command.CancelOrderCommand
+    - com.company.product.domains.core.order.api.command.CancelOrderCommand
   must_not_change:
-    - order.api.query.OrderQueryFacade
-
+    - com.company.product.domains.core.order.api.query.OrderQueryFacade
 constraints:
-  - 不修改 Platform
-  - 不直接访问库存模块 internal 或数据库表
-  - 不改变现有订单创建流程
-  - 需要越界时先申请调整 Scope
-
+  - Platform、全局配置、测试门禁和任务Scope不得自行修改
+  - 不直接访问库存internal或库存表
+  - 不允许通过修改SQL、绕过租户插件或伪造用户实现越权操作
+  - 不涉及数据库迁移；需要时单独确认脚本范围
+  - api命令子包如需公开，确认NamedInterface声明
 acceptance:
-  - 已取消订单再次取消时返回幂等结果
-  - 不允许取消的订单状态返回明确业务错误
-  - 订单模块编译通过
-  - 订单模块测试通过
-  - Spring Modulith 和 ArchUnit 校验通过
-
+  - 取消成功和重复取消幂等
+  - 非法状态返回稳定业务码
+  - 匿名、无权限和跨租户操作被拒绝
+  - 既有创建流程与API消费方兼容
+  - 全量验证及Scope检查通过；无未声明依赖
 verification:
   commands:
-    - ./mvnw -DskipTests compile
-    - ./mvnw -Dtest='*Order*Test,*ArchitectureTests' test
+    unix: ./mvnw verify
+    windows: mvnw.cmd verify
+  # 若无Wrapper，按项目接入清单替换为锁定的Maven命令。
+  required_checks:
+    - 模块发现清单和依赖规则
+    - 单元、模块、架构与集成测试
+    - Scope包含新增删除重命名两端及本地未跟踪文件
   report:
     - changed_files
-    - test_results
-    - contract_changes
-    - remaining_risks
+    - executed_commands_and_results
+    - skipped_checks_and_reasons
+    - contract_config_and_data_changes
+    - remaining_risks_and_rollback
+
